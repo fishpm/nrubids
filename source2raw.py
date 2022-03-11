@@ -55,6 +55,21 @@ class Source2Raw():
 				'participants': '/'.join([self.inputvar['raw_id'], self.inputvar['project_id'], 'participants.tsv'])}
 		
 		self.bids_data_types = ['anat','func','fmap']
+		
+		self.func_dictionary = {'faces': ['faces'], 'reward': ['reward'], 'rest': ['rest', 'resting']}
+		self.raw_file_types = ['T1', 'T2', 'EP2D', 'GRE']
+		self.raw_file_notallowed = ['ND']
+		
+	def process_images(self):
+		# DESCRIPTION: Process newly convert images for assignment to data_type folder or removal
+		
+		
+	
+	def image_type_identifier(self):
+		
+		# DESCRIPTION: Identify type of file and assign for further processing
+		
+		
 	
 	def check_rawfolder(self):
 		
@@ -166,11 +181,10 @@ class Source2Raw():
 	def check_all(self):
 		
 		# DESCRIPTION: "all-in-one" function that executes relevant methods in sequence
-		
 		self.check_rawfolder()
 		self.check_sesfolder()
 		self.check_datafolder()
-		self.identify_source_inputs()
+		self.dcmfolders = s2r.identify_source_inputs()
 		
 	def identify_source_inputs(self):
 		
@@ -183,7 +197,9 @@ class Source2Raw():
 			print('Converting: %s ' % i)
 			dcm2niix_cmd = d2n_path + ' -o ' + self.bidsinfo['sesfolder'] + ' -z y -f ' + i + ' ' + '/'.join([sourceFolder,i])
 			os.system(dcm2niix_cmd)
+		
 		print('Done reading source input folders!')
+		return(dcmfolders)
 	
 	def generate_participants_file(self):
 		
