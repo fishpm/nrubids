@@ -6,6 +6,7 @@ Created on Wed Feb  2 11:49:05 2022
 @author: patrick
 """
 
+# Relevant libraries
 import sys
 import os
 import pandas as pd
@@ -29,6 +30,7 @@ class Source2Raw():
 		self.inputvar = {inputvarList[i]: argumentList[i] for i in range(len(argumentList))}
 		self.inputcmd = ' '.join(allargs)
 		
+		# display inputs
 		print('Inputs received:')
 		for i in range(len(self.inputvar.keys())):
 			print('%s: %s' % (list(self.inputvar.items())[i][0], list(self.inputvar.items())[i][1]))
@@ -53,44 +55,59 @@ class Source2Raw():
 		
 		self.bids_data_types = ['anat','func','fmap']
 		
+		# list of available directories and name variants (update as needed)
 		self.func_dictionary = {'faces': ['faces'], 'reward': ['reward'], 'rest': ['rest', 'resting']}
 		self.anat_dictionary = {'T1': ['t1'], 'T2': ['t2']}
 		self.fmap_dictionary = {'GRE_FIELD_MAPPING': ['gre_field_mapping']}
+		
+		 # currently not used (delete?)
 		self.raw_file_types = ['T1', 'T2', 'EP2D', 'GRE']
+		
+		# flag used for excluding certain scans
 		self.raw_file_notallowed = ['ND']
 		
-		self.dcmfolders = {}
-		
 	def process_dcmfolders(self):
-		# DESCRIPTION: Process newly convert images for assignment to data_type folder or removal
 		
-		if len(self.dcmfolders)>0:
-			self.sourcefile = {}
-			for i in self.dcmfolders:
+		# DESCRIPTION: Extract and organize information for newly converted images
+		
+		if len(self.dcmfolders)>0:			
+			self.sourcefile = {} # stores relevant info for building bids name	
+			for i in self.dcmfolders:				
 				print('Processing %s...' % i)
+				
 				tmpstr = '^(' + i + ').*(.json)$'
+				
+				# list of json files for specific dcmfolder name (can be more than one, e.g., multi-echo)
 				json_list = [elem for elem in os.listdir(self.bidsinfo['sesfolder']) if re.search(tmpstr, elem)]
+				
 				for elem in json_list:
+					
+					# dcmfolder specific dictionary
 					self.sourcefile[elem] = {}
 					self.sourcefile[elem]['oldjson'] = str(Path(self.bidsinfo['sesfolder'], elem))
 					self.sourcefile[elem]['oldnii'] = str(Path(self.bidsinfo['sesfolder'], os.path.splitext(elem)[0] + '.nii.gz')) 
+					
+					# match each dcmfolder to a bids data_type
 					for j in self.bids_data_types:
 						matches = [k for k in getattr(self, j + '_dictionary').keys() if [v for v in getattr(self, j + '_dictionary')[k] if re.search(v, elem.lower())]]
 						if matches:
-							print('%s assigned to %s' % (elem,j))
-							self.sourcefile[elem]['data_type'] = j
+							print('%s assigned to %s' % (elem,j))							
+							# store data_type specific information in sourcefile dictionary
+							self.sourcefile[elem]['data_type'] = j							
 							if j == 'func':
 								self.sourcefile[elem]['task'] = ''.join([k for k in self.func_dictionary.keys() if [v for v in self.func_dictionary[k] if re.search(v, elem.lower())]])
 								self.sourcefile[elem]['tail'] = 'bold'
 							elif j == 'anat':
-								self.sourcefile[elem]['tail'] = ''.join(matches) + 'w'
-							break
+								self.sourcefile[elem]['tail'] = ''.join(matches) + 'w'								
+							break # stop looping through data_types after match identified
 					
+					# load json file
 					json_fullpath = Path(self.bidsinfo['sesfolder'], elem)
 					f = open(json_fullpath)
 					json_data = json.load(f)
 					f.close()
 					
+					# store data_type specific information in sourcefile dictionary
 					if 'AcquisitionTime' in json_data.keys():
 						self.sourcefile[elem]['AcquisitionTime'] = json_data['AcquisitionTime']
 					else:
@@ -117,13 +134,16 @@ class Source2Raw():
 						elif 'M' and not 'NORM' in self.sourcefile[elem]['ImageType']:
 							self.sourcefile[elem]['tail'] = ''
 		else:
-			sys.exit('dcmfolders is empty.')
+			sys.exit('dcmfolders is empty.') # something went wrong
 		
+		# loop through all intermediate image files to get info to set final name
 		for elem in self.sourcefile.keys():	
-	
+			
+			# skip images without a tail
 			if not self.sourcefile[elem]['tail']:
 					continue
 			
+			# use acquisition times for similar image type to determine run number
 			if self.sourcefile[elem]['data_type'] == 'func':
 				same_data_type = [k for k in self.sourcefile.keys() if self.sourcefile[k]['data_type']==self.sourcefile[elem]['data_type']]
 				sorted_acqtimes = sorted([self.sourcefile[k]['AcquisitionTime'] for k in same_data_type if self.sourcefile[k]['task']==self.sourcefile[elem]['task']])	
@@ -132,32 +152,40 @@ class Source2Raw():
 				same_tail = [k for k in self.sourcefile.keys() if self.sourcefile[k]['tail']==self.sourcefile[elem]['tail']]
 				sorted_acqtimes = sorted([self.sourcefile[k]['AcquisitionTime'] for k in same_tail])
 			
+			# determine run number for current image
 			curr_run = [idx for idx in range(len(sorted_acqtimes)) if sorted_acqtimes[idx]==self.sourcefile[elem]['AcquisitionTime']]
 			if len(curr_run)>1:
-				sys.exit('Multiple acquisitions have same time stamp')
+				sys.exit('Multiple acquisitions have same time stamp') # something went wrong
 			elif len(curr_run)==0:
-				sys.exit('No matching acquisition time stamps found')
+				sys.exit('No matching acquisition time stamps found') # something went wrong
 			else:
 				self.sourcefile[elem]['run'] = "%02d" % (curr_run[0]+1,)
-			
 		
 	def move_dcmfolders(self):
 		
 		# DESCRIPTION: Move dicom files to respective folders
 		
+		# run only if sourcefile is not empty
 		if len(self.sourcefile)>0:
+			
 			sub_elem = self.bidsinfo['sub']
 			ses_elem = self.bidsinfo['ses']
+			
 			for elem in self.sourcefile.keys():
+				
+				# remove image files without a tail
 				if not self.sourcefile[elem]['tail']:
 					print('Removing %s...' % self.sourcefile[elem]['oldjson'])
 					os.remove(self.sourcefile[elem]['oldjson'])
 					print('Removing %s...' % self.sourcefile[elem]['oldnii'])
 					os.remove(self.sourcefile[elem]['oldnii'])
 					continue
+				
 				tail_elem = self.sourcefile[elem]['tail']
 				data_type_elem = self.sourcefile[elem]['data_type']
 				run_elem = '-'.join(['run', self.sourcefile[elem]['run']])
+				
+				# write out new file name
 				if self.sourcefile[elem]['data_type'] == 'func':
 					task_elem = self.sourcefile[elem]['task']
 					newjson = str(Path(self.bidsinfo['sesfolder'], data_type_elem, '_'.join([sub_elem, ses_elem, run_elem, task_elem, tail_elem]) + '.json'))
@@ -171,6 +199,8 @@ class Source2Raw():
 				
 				self.sourcefile[elem]['newjson'] = newjson
 				self.sourcefile[elem]['newnii'] = newnii
+				
+				# move files to appropriate location with bids structure
 				print(elem + ':')
 				os.rename(self.sourcefile[elem]['oldjson'], self.sourcefile[elem]['newjson'])
 				print('FROM: %s' % self.sourcefile[elem]['oldjson'])
@@ -178,6 +208,8 @@ class Source2Raw():
 				os.rename(self.sourcefile[elem]['oldnii'], self.sourcefile[elem]['newnii'])
 				print('FROM: %s' % self.sourcefile[elem]['oldnii'])
 				print('TO: %s' % self.sourcefile[elem]['newnii'])
+		else:
+			sys.exit('sourcefile is empty.') # something went wrong
 	
 	def check_rawfolder(self):
 		
@@ -279,8 +311,6 @@ class Source2Raw():
 		
 		# DESCRIPTION: update participants.tsv file
 		
-		# NOTE: to_csv works if code run in python but from shell (not sure why)
-		
 		dd = pd.read_csv(self.bidsinfo['participants'], sep = '\t')
 		dd = dd.append({'participant_id': self.bidsinfo['sub'],'session_id': self.bidsinfo['ses'], 'mr_id': self.inputvar['mr_id']}, ignore_index = True)
 		dd.to_csv(self.bidsinfo['participants'], sep = '\t', index = False)
@@ -336,6 +366,7 @@ class Source2Raw():
 				os.system(dcm2niix_cmd)
 		
 		print('Done converting source input folders!')
+		self.dcmfolders = {}
 		self.dcmfolders = [elem for elem in dcmfolders if elem not in toremove]
 	
 	def generate_participants_file(self):
