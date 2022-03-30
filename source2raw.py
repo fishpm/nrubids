@@ -6,7 +6,7 @@ Created on Wed Feb  2 11:49:05 2022
 @author: patrick
 """
 
-from sys import argv
+import sys
 import os
 import pandas as pd
 import re
@@ -14,24 +14,20 @@ from pathlib import Path
 import json
 
 # Input from command line
-#argumentList = argv[1:]
-
-raw_id = '/mrdata/patrick/raw'
-project_id = 'np2-p2'
-cimbi_id = '53888'
-mr_id = 'p231sc'
-argumentList = [raw_id, project_id, cimbi_id, mr_id]
+allargs = sys.argv
 
 class Source2Raw():
 	
 	def __init__(self):
 		
+		argumentList = allargs[1:]
 		if not len(argumentList) == 4:
-			ValueError('Four required inputs (in order): raw_id, project_id, cimbi_id, mr_id; %s inputs received' % str(len(argumentList)))
+			sys.exit('Four required inputs (in order): raw_id, project_id, cimbi_id, mr_id; %s inputs received' % str(len(argumentList)))
 		
 		# input variables
 		inputvarList = ['raw_id', 'project_id','cimbi_id','mr_id']
 		self.inputvar = {inputvarList[i]: argumentList[i] for i in range(len(argumentList))}
+		self.inputcmd = ' '.join(allargs)
 		
 		print('Inputs received:')
 		for i in range(len(self.inputvar.keys())):
@@ -59,136 +55,129 @@ class Source2Raw():
 		
 		self.func_dictionary = {'faces': ['faces'], 'reward': ['reward'], 'rest': ['rest', 'resting']}
 		self.anat_dictionary = {'T1': ['t1'], 'T2': ['t2']}
+		self.fmap_dictionary = {'GRE_FIELD_MAPPING': ['gre_field_mapping']}
 		self.raw_file_types = ['T1', 'T2', 'EP2D', 'GRE']
 		self.raw_file_notallowed = ['ND']
 		
 		self.dcmfolders = {}
 		
-	def process_images(self):
+	def process_dcmfolders(self):
 		# DESCRIPTION: Process newly convert images for assignment to data_type folder or removal
 		
-		if len(self.dcmfolders['foldername'])>0:
-			for i in self.dcmfolders['foldername']:
-				print('Processing %s...' % i) 
-				func_matches = [k for k in self.func_dictionary.keys() if [j for j in self.func_dictionary[k] if re.search(j, i.lower())]]
-				if func_matches:
-					data_type = 'func'
-				elif re.search('T1|T2', i):
-					data_type = 'anat'
-				elif re.search('GRE', i):
-					data_type = 'fmap'
-				else:
-					ValueError('Could not find data type for: %s' % i)
-				
-				print('%s assigned to %s' % (i,data_type)) 
-				self.process_data_type(i, data_type)
-		else:
-			print('foldername key in dcmfolders is empty')
-		
-	def process_data_type(self, dcmfolder, data_type):
-		
-		# DESCRIPTION: Identify type of file and assign for further processing
-		
-		if data_type == 'func':
-			
-			func_matches = [k for k in self.func_dictionary.keys() if [j for j in self.func_dictionary[k] if re.search(j, dcmfolder.lower())]]
-			func_name = ''.join(func_matches)
-			func_name_matches = [fname for fname in self.dcmfolders['foldername'] if [elem for elem in self.func_dictionary[func_name] if re.search(elem, fname.lower())]]
-			acquisitiontime_val = []
-			for elem in func_name_matches:
-				tmpstr = '^(' + elem + ').*(.json)$'
-				func_json = [elem2 for elem2 in os.listdir(self.bidsinfo['sesfolder']) if re.search(tmpstr, elem2)]
-				if len(func_json)>1:
-					ValueError('Too many func_json matches (%s)' % len(func_json))
-				func_json_fullpath = Path(self.bidsinfo['sesfolder'], func_json[0])
-				f = open(func_json_fullpath)
-				json_data = json.load(f)
-				f.close()
-				if 'AcquisitionTime' in json_data.keys():
-					acquisitiontime_val.append(json_data['AcquisitionTime'])
-				else:
-					ValueError('AcquisitionTime key not identified in %s' % func_json)
-			
-			for k in range(len(acquisitiontime_val)):
-				func_json_fullpath = Path(self.bidsinfo['sesfolder'], func_json[k])
-				run_list = [idx for idx in range(len(acquisitiontime_val)) if sorted(acquisitiontime_val)[idx] == acquisitiontime_val[k]]
-				if len(run_list) > 1:
-					ValueError('Multiple acquisitions have same time stamp')
-				run_idx = "%02d" % (run_list[0]+1,)
-				
-				fparts = os.path.splitext(os.path.basename(func_json_fullpath))
-				restr = '^(' + fparts[0] + ')'
-				fmatches_old = [elem for elem in os.listdir(self.bidsinfo['sesfolder']) if re.search(restr, elem)]
-				fmatches_new = []
-				for idx in range(len(fmatches_old)):
-					currfile = fmatches_old[idx]
-					if re.search('(.nii.gz)$',currfile):
-						suffix = '.nii.gz'
-					elif re.search('(.json)$',currfile):
-						suffix = '.json'
-						
-					newfilename = '_'.join([self.bidsinfo['sub'],self.bidsinfo['ses'],'task-' + func_name, 'run-' + run_idx,'bold']) + suffix
-					fmatches_new.append(newfilename)
+		if len(self.dcmfolders)>0:
+			self.sourcefile = {}
+			for i in self.dcmfolders:
+				print('Processing %s...' % i)
+				tmpstr = '^(' + i + ').*(.json)$'
+				json_list = [elem for elem in os.listdir(self.bidsinfo['sesfolder']) if re.search(tmpstr, elem)]
+				for elem in json_list:
+					self.sourcefile[elem] = {}
+					self.sourcefile[elem]['oldjson'] = str(Path(self.bidsinfo['sesfolder'], elem))
+					self.sourcefile[elem]['oldnii'] = str(Path(self.bidsinfo['sesfolder'], os.path.splitext(elem)[0] + '.nii.gz')) 
+					for j in self.bids_data_types:
+						matches = [k for k in getattr(self, j + '_dictionary').keys() if [v for v in getattr(self, j + '_dictionary')[k] if re.search(v, elem.lower())]]
+						if matches:
+							print('%s assigned to %s' % (elem,j))
+							self.sourcefile[elem]['data_type'] = j
+							if j == 'func':
+								self.sourcefile[elem]['task'] = ''.join([k for k in self.func_dictionary.keys() if [v for v in self.func_dictionary[k] if re.search(v, elem.lower())]])
+								self.sourcefile[elem]['tail'] = 'bold'
+							elif j == 'anat':
+								self.sourcefile[elem]['tail'] = ''.join(matches) + 'w'
+							break
 					
-					oldfile_fullpath = Path(self.bidsinfo['sesfolder'], fmatches_old[idx])
-					newfile_fullpath = Path(self.bidsinfo['sesfolder'], 'func', fmatches_new[idx])
-					os.rename(oldfile_fullpath, newfile_fullpath)
-					print('%s moved to %s in func folder' % (fmatches_old[idx], fmatches_new[idx]))
-			
-		elif data_type == 'anat':
-#			anat_matches = [k for k in self.anat_dictionary.keys() if [j for j in self.anat_dictionary[k] if re.search(j, dcmfolder.lower())]]
-#			anat_name = ''.join(anat_matches)
-#			anat_name_matches = [fname for fname in self.dcmfolders['foldername'] if [elem for elem in self.anat_dictionary[anat_name] if re.search(elem, fname.lower())]]
-#			
-#			
-#			acquisitiontime_val = []
-#			
-#			anat_jsons = [elem for elem in os.listdir(self.bidsinfo['sesfolder']) if re.search('^(T1).*(.json)$', elem)]
-#			
-#			for anat_json in anat_jsons:
-#				anat_json_fullpath = Path(sesfolder, anat_json)
-#				f = open(anat_json_fullpath)
-#				json_data = json.load(f)
-#				f.close()
-#				if 'ImageType' in json_data.keys():
-#					imagetype_val = json_data['ImageType']
-#				else:
-#					ValueError('ImageType key not identified in %s' % anat_json)
-#				
-#				if 'ND' not in imagetype_val:
-#					print('%s lacks ND, moving to anat...' % anat_json)
-#					print('ImageType field: ' + ', '.join(imagetype_val))
-#					fparts = os.path.splitext(os.path.basename(anat_json_fullpath))
-#					restr = '^(' + fparts[0] + ')'
-#					fmatches_old = [elem for elem in os.listdir(sesfolder) if re.search(restr, elem)]
-#					fmatches_new = []
-#					for idx in range(len(fmatches_old)):
-#						fname = fmatches_old[idx]
-#						if re.search('(.nii.gz)$',fname):
-#							suffix = '.nii.gz'
-#						elif re.search('(.json)$',fname):
-#							suffix = '.json'
-#						newfilename = '_'.join([sub_id,ses_id,'T1w']) + suffix
-#						fmatches_new.append(newfilename)
-#						oldfile_fullpath = Path(sesfolder, fmatches_old[idx])
-#						newfile_fullpath = Path(sesfolder, 'anat', fmatches_new[idx])
-#						os.rename(oldfile_fullpath, newfile_fullpath)
-#						print('%s moved to %s in anat folder' % (fmatches_old[idx], fmatches_new[idx]))
-#				else:
-#					print('%s has ND, removing...' % anat_json)
-#					print('ImageType field: ' + ', '.join(imagetype_val))
-#					fparts = os.path.splitext(os.path.basename(anat_json_fullpath))
-#					restr = '^(' + fparts[0] + ')'
-#					fmatches_old = [elem for elem in os.listdir(sesfolder) if re.search(restr, elem)]
-#					for idx in range(len(fmatches_old)):
-#						oldfile_fullpath = Path(sesfolder, fmatches_old[idx])
-#						os.remove(oldfile_fullpath)
-#			print('Done processing anat!')
-			print('anat: add code')
-		elif data_type == 'fmap':
-			print('fmap: add code')
+					json_fullpath = Path(self.bidsinfo['sesfolder'], elem)
+					f = open(json_fullpath)
+					json_data = json.load(f)
+					f.close()
+					
+					if 'AcquisitionTime' in json_data.keys():
+						self.sourcefile[elem]['AcquisitionTime'] = json_data['AcquisitionTime']
+					else:
+						sys.exit('AcquisitionTime key not identified in %s' % elem)
+						
+					if 'ImageType' in json_data.keys():
+						self.sourcefile[elem]['ImageType'] = json_data['ImageType']
+					else:
+						sys.exit('ImageType key not identified in %s' % elem)
+					
+					if 'EchoNumber' in json_data.keys():
+						self.sourcefile[elem]['EchoNumber'] = json_data['EchoNumber']
+					else:
+						self.sourcefile[elem]['EchoNumber'] = ''
+					
+					if self.sourcefile[elem]['data_type'] == 'fmap':
+						if 'PHASE' in self.sourcefile[elem]['ImageType']:
+							self.sourcefile[elem]['tail'] = 'phasediff'
+						elif 'M' and 'NORM' in self.sourcefile[elem]['ImageType']:
+							if self.sourcefile[elem]['EchoNumber'] != '':
+								self.sourcefile[elem]['tail'] = 'magnitude' + str(self.sourcefile[elem]['EchoNumber'])
+							else:
+								sys.exit('EchoNumber expected but not found.')
+						elif 'M' and not 'NORM' in self.sourcefile[elem]['ImageType']:
+							self.sourcefile[elem]['tail'] = ''
 		else:
-			ValueError('Unknown data_type: %s' % data_type)
+			sys.exit('dcmfolders is empty.')
+		
+		for elem in self.sourcefile.keys():	
+	
+			if not self.sourcefile[elem]['tail']:
+					continue
+			
+			if self.sourcefile[elem]['data_type'] == 'func':
+				same_data_type = [k for k in self.sourcefile.keys() if self.sourcefile[k]['data_type']==self.sourcefile[elem]['data_type']]
+				sorted_acqtimes = sorted([self.sourcefile[k]['AcquisitionTime'] for k in same_data_type if self.sourcefile[k]['task']==self.sourcefile[elem]['task']])	
+			
+			elif self.sourcefile[elem]['data_type'] == 'fmap' or self.sourcefile[elem]['data_type'] == 'anat':
+				same_tail = [k for k in self.sourcefile.keys() if self.sourcefile[k]['tail']==self.sourcefile[elem]['tail']]
+				sorted_acqtimes = sorted([self.sourcefile[k]['AcquisitionTime'] for k in same_tail])
+			
+			curr_run = [idx for idx in range(len(sorted_acqtimes)) if sorted_acqtimes[idx]==self.sourcefile[elem]['AcquisitionTime']]
+			if len(curr_run)>1:
+				sys.exit('Multiple acquisitions have same time stamp')
+			elif len(curr_run)==0:
+				sys.exit('No matching acquisition time stamps found')
+			else:
+				self.sourcefile[elem]['run'] = "%02d" % (curr_run[0]+1,)
+			
+		
+	def move_dcmfolders(self):
+		
+		# DESCRIPTION: Move dicom files to respective folders
+		
+		if len(self.sourcefile)>0:
+			sub_elem = self.bidsinfo['sub']
+			ses_elem = self.bidsinfo['ses']
+			for elem in self.sourcefile.keys():
+				if not self.sourcefile[elem]['tail']:
+					print('Removing %s...' % self.sourcefile[elem]['oldjson'])
+					os.remove(self.sourcefile[elem]['oldjson'])
+					print('Removing %s...' % self.sourcefile[elem]['oldnii'])
+					os.remove(self.sourcefile[elem]['oldnii'])
+					continue
+				tail_elem = self.sourcefile[elem]['tail']
+				data_type_elem = self.sourcefile[elem]['data_type']
+				run_elem = '-'.join(['run', self.sourcefile[elem]['run']])
+				if self.sourcefile[elem]['data_type'] == 'func':
+					task_elem = self.sourcefile[elem]['task']
+					newjson = str(Path(self.bidsinfo['sesfolder'], data_type_elem, '_'.join([sub_elem, ses_elem, run_elem, task_elem, tail_elem]) + '.json'))
+					newnii = str(Path(self.bidsinfo['sesfolder'], data_type_elem, '_'.join([sub_elem, ses_elem, run_elem, task_elem, tail_elem]) + '.nii.gz'))
+				elif self.sourcefile[elem]['data_type'] == 'anat':
+					newjson = str(Path(self.bidsinfo['sesfolder'], data_type_elem, '_'.join([sub_elem, ses_elem, tail_elem]) + '.json'))
+					newnii = str(Path(self.bidsinfo['sesfolder'], data_type_elem, '_'.join([sub_elem, ses_elem, tail_elem]) + '.nii.gz'))
+				elif self.sourcefile[elem]['data_type'] == 'fmap':
+					newjson = str(Path(self.bidsinfo['sesfolder'], data_type_elem, '_'.join([sub_elem, ses_elem, run_elem, tail_elem]) + '.json'))
+					newnii = str(Path(self.bidsinfo['sesfolder'], data_type_elem, '_'.join([sub_elem, ses_elem, run_elem, tail_elem]) + '.nii.gz'))
+				
+				self.sourcefile[elem]['newjson'] = newjson
+				self.sourcefile[elem]['newnii'] = newnii
+				print(elem + ':')
+				os.rename(self.sourcefile[elem]['oldjson'], self.sourcefile[elem]['newjson'])
+				print('FROM: %s' % self.sourcefile[elem]['oldjson'])
+				print('TO: %s' % self.sourcefile[elem]['newjson'])
+				os.rename(self.sourcefile[elem]['oldnii'], self.sourcefile[elem]['newnii'])
+				print('FROM: %s' % self.sourcefile[elem]['oldnii'])
+				print('TO: %s' % self.sourcefile[elem]['newnii'])
 	
 	def check_rawfolder(self):
 		
@@ -297,14 +286,32 @@ class Source2Raw():
 		dd.to_csv(self.bidsinfo['participants'], sep = '\t', index = False)
 		print('%s file updated!' % self.bidsinfo['participants'])
 	
-	def check_all(self):
+	def check_mrid(self):
+		
+		sourceDir = os.listdir(Path(self.mrsource, self.mrscanner))
+		mr_matches = [idx for idx in sourceDir if re.search('^' + self.inputvar['mr_id'], idx)]
+		if len(mr_matches) == 0:
+			sys.exit('No MR IDs in source match input (%s)' % self.inputvar['mr_id'])
+		elif len(mr_matches) > 1:
+			sys.exit('Specified MR ID ambiguous...%s matches' % len(mr_matches))
+		else:
+			mr_id_full = ''.join(mr_matches)
+			if self.inputvar['mr_id'] != mr_id_full:
+				print('Updating mr_id inputvar (%s -> %s)' % (self.inputvar['mr_id'], mr_id_full))
+				self.inputvar['mr_id'] = mr_id_full
+			else:
+				print('mr_id: %s verified!' % self.inputvar['mr_id'])
+	
+	def run_all(self):
 		
 		# DESCRIPTION: "all-in-one" function that executes relevant methods in sequence
+		self.check_mrid()
 		self.check_rawfolder()
 		self.check_sesfolder()
 		self.check_datafolder()
 		self.convert_source_inputs()
-		self.process_images()
+		self.process_dcmfolders()
+		self.move_dcmfolders()
 		
 	def convert_source_inputs(self):
 		
@@ -313,10 +320,12 @@ class Source2Raw():
 		sourceDir = os.listdir(sourceFolder)
 		dcmfolders = [i for i in sourceDir if re.search('^(EP2D|T1|T2|GRE).*([0-9]{4})', i)]
 		d2n_path = 'dcm2niix'
+		toremove = []
 		for i in dcmfolders:
 			disallowed_matches = [tmpstr for tmpstr in self.raw_file_notallowed if re.search(tmpstr,i)]
 			if disallowed_matches:
 				print('Disallowed match found: %s. Skipping dcm2niix...' % i)
+				toremove.append(i)
 				continue
 			imgmatch = [fname for fname in os.listdir(self.bidsinfo['sesfolder']) if re.search('^(' + i + '.*.nii.gz)$', fname)]
 			if imgmatch:
@@ -327,7 +336,7 @@ class Source2Raw():
 				os.system(dcm2niix_cmd)
 		
 		print('Done converting source input folders!')
-		self.dcmfolders['foldername'] = dcmfolders
+		self.dcmfolders = [elem for elem in dcmfolders if elem not in toremove]
 	
 	def generate_participants_file(self):
 		
@@ -340,13 +349,36 @@ class Source2Raw():
 	
 if __name__ == '__main__':
 	
-	s2r = Source2Raw()
-	s2r.check_all()
-	print('Input data: %s %s %s' % (s2r.inputvar['project_id'], s2r.inputvar['cimbi_id'], s2r.inputvar['mr_id']))
-		
-s2r = Source2Raw()
-s2r.check_rawfolder()
-s2r.check_sesfolder()
-s2r.check_datafolder()
-s2r.convert_source_inputs()
-s2r.process_images()
+	self = Source2Raw()
+	self.run_all()
+	print('Input data: %s %s %s' % (self.inputvar['project_id'], self.inputvar['cimbi_id'], self.inputvar['mr_id']))
+	print('Done!')
+	
+#for i in range(1,3):
+#	if i == 1:
+#		raw_id = '/mrdata/patrick/raw'
+#		project_id = 'np2-p2'
+#		cimbi_id = '53888'
+#		mr_id = 'p231sc'
+#		argumentList = [raw_id, project_id, cimbi_id, mr_id]
+#	else:
+#		raw_id = '/mrdata/patrick/raw'
+#		project_id = 'np2-p2'
+#		cimbi_id = '55867'
+#		mr_id = 'p240mb'
+#		argumentList = [raw_id, project_id, cimbi_id, mr_id]
+#	
+#	s2r = Source2Raw()
+#	s2r.check_rawfolder()
+#	s2r.check_sesfolder()
+#	s2r.check_datafolder()
+#	s2r.convert_source_inputs()
+#	s2r.process_dcmfolders()
+#	s2r.move_dcmfolders()
+	
+# python3 /data1/patrick/SCRIPTS/py/source2raw/source2raw.py /mrdata/patrick/raw np2-p2 53888 p231sc 
+# python3 /data1/patrick/SCRIPTS/py/source2raw/source2raw.py /mrdata/patrick/raw np2-p2 55867 p240mb
+# python3 /data1/patrick/SCRIPTS/py/source2raw/source2raw.py /mrdata/patrick/raw np2-p2 53888 p239sc 
+# python3 /data1/patrick/SCRIPTS/py/source2raw/source2raw.py /mrdata/patrick/raw np2-p2 53888 p266
+
+# python3 /mrdata/patrick/source2raw.py /mrdata/patrick/raw np2-p2 53888 p231sc 
