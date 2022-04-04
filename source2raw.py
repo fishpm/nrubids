@@ -45,13 +45,13 @@ class Source2Raw():
 		
 		# bids elements
 		self.bidsinfo = {
-				'sourcefolder': Path(self.mrsource, self.mrscanner),
+				'sourcefolder': str(Path(self.mrsource, self.mrscanner)),
 				'rawfolder': self.inputvar['raw_id'],
-				'projfolder': Path(self.inputvar['raw_id'], self.inputvar['project_id']),
+				'projfolder': str(Path(self.inputvar['raw_id'], self.inputvar['project_id'])),
 				'sub': 'sub-' + self.inputvar['cimbi_id'],
-				'subfolder': Path(self.inputvar['raw_id'], self.inputvar['project_id'], 'sub-' + self.inputvar['cimbi_id']),
+				'subfolder': str(Path(self.inputvar['raw_id'], self.inputvar['project_id'], 'sub-' + self.inputvar['cimbi_id'])),
 				'dataset_description': Path(self.inputvar['raw_id'], self.inputvar['project_id'], 'dataset_description.json'),
-				'participants': Path(self.inputvar['raw_id'], self.inputvar['project_id'], 'participants.tsv')}
+				'participants': str(Path(self.inputvar['raw_id'], self.inputvar['project_id'], 'participants.tsv'))}
 		
 		self.bids_data_types = ['anat','func','fmap']
 		
@@ -102,10 +102,16 @@ class Source2Raw():
 							break # stop looping through data_types after match identified
 					
 					# load json file
-					json_fullpath = Path(self.bidsinfo['sesfolder'], elem)
+					json_fullpath = str(Path(self.bidsinfo['sesfolder'], elem))
 					f = open(json_fullpath)
 					json_data = json.load(f)
 					f.close()
+					
+					# add TaskName field to json (func only)
+					if self.sourcefile[elem]['data_type'] == 'func':
+						json_data['TaskName'] = self.sourcefile[elem]['task']
+						with open(json_fullpath, 'w') as outfile:
+							outfile.write(json.dumps(json_data, indent = 4))
 					
 					# store data_type specific information in sourcefile dictionary
 					if 'AcquisitionTime' in json_data.keys():
@@ -188,8 +194,8 @@ class Source2Raw():
 				# write out new file name
 				if self.sourcefile[elem]['data_type'] == 'func':
 					task_elem = '-'.join(['task', self.sourcefile[elem]['task']])
-					newjson = str(Path(self.bidsinfo['sesfolder'], data_type_elem, '_'.join([sub_elem, ses_elem, run_elem, task_elem, tail_elem]) + '.json'))
-					newnii = str(Path(self.bidsinfo['sesfolder'], data_type_elem, '_'.join([sub_elem, ses_elem, run_elem, task_elem, tail_elem]) + '.nii.gz'))
+					newjson = str(Path(self.bidsinfo['sesfolder'], data_type_elem, '_'.join([sub_elem, ses_elem, task_elem, run_elem, tail_elem]) + '.json'))
+					newnii = str(Path(self.bidsinfo['sesfolder'], data_type_elem, '_'.join([sub_elem, ses_elem, task_elem, run_elem, tail_elem]) + '.nii.gz'))
 				elif self.sourcefile[elem]['data_type'] == 'anat':
 					newjson = str(Path(self.bidsinfo['sesfolder'], data_type_elem, '_'.join([sub_elem, ses_elem, tail_elem]) + '.json'))
 					newnii = str(Path(self.bidsinfo['sesfolder'], data_type_elem, '_'.join([sub_elem, ses_elem, tail_elem]) + '.nii.gz'))
@@ -216,7 +222,7 @@ class Source2Raw():
 		# DESCRIPTION: Check for presence of expected folders/files and generate ones not present but necessary to process current dataset
 		
 		# check that raw folder exists (make if necessary)
-		if not os.path.isdir(self.inputvar['raw_id']):
+		if not os.path.isdir(self.bidsinfo['rawfolder']):
 			print('Raw folder NOT found: %s. Making it...' % self.bidsinfo['rawfolder'])
 		else:
 			print('Raw folder found: %s' % self.bidsinfo['rawfolder'])
@@ -229,10 +235,10 @@ class Source2Raw():
 			print('Project folder found: %s!' % self.bidsinfo['projfolder'])
 		
 		# check that dataset_description.json exists (make if necessary)
-		ddfile = Path(self.bidsinfo['projfolder'], 'dataset_description.json')
+		ddfile = str(Path(self.bidsinfo['projfolder'], 'dataset_description.json'))
 		if not os.path.exists(ddfile):
 			print('dataset_description NOT found: %s. Making it...' % self.bidsinfo['dataset_description'])
-			os.system('python3 /data1/patrick/SCRIPTS/py/source2raw/CreateDatasetDescription.py ' + self.inputvar['raw_id'])
+			os.system('python3 /data1/patrick/SCRIPTS/py/source2raw/CreateDatasetDescription.py ' + self.bidsinfo['projfolder'])
 		else:
 			print('dataset_description.json found: %s' % self.bidsinfo['dataset_description'])
 		
@@ -274,13 +280,13 @@ class Source2Raw():
 				mr_matches = dd.index[dd['mr_id'] == self.inputvar['mr_id']].tolist()
 				
 				self.bidsinfo['ses'] = dd.iloc[mr_matches]['session_id'].values[0]
-				self.bidsinfo['sesfolder'] = Path(self.bidsinfo['subfolder'], self.bidsinfo['ses'])
+				self.bidsinfo['sesfolder'] = str(Path(self.bidsinfo['subfolder'], self.bidsinfo['ses']))
 				print('Session folder found: %s!' % self.bidsinfo['sesfolder'])
 				
 			else:
 				
 				self.bidsinfo['ses'] = 'ses-' + f"{len(sub_matches)+1:03d}"
-				self.bidsinfo['sesfolder'] = Path(self.bidsinfo['subfolder'], self.bidsinfo['ses'])
+				self.bidsinfo['sesfolder'] = str(Path(self.bidsinfo['subfolder'], self.bidsinfo['ses']))
 				print('Session folder NOT found: %s. Making it...' % self.bidsinfo['sesfolder'])
 				self.update_participants()
 				os.mkdir(self.bidsinfo['sesfolder'])
@@ -289,7 +295,7 @@ class Source2Raw():
 		else:
 			print('%s not assigned' % (self.bidsinfo['sub']))
 			self.bidsinfo['ses'] = 'ses-001'
-			self.bidsinfo['sesfolder'] = Path(self.bidsinfo['subfolder'], self.bidsinfo['ses'])
+			self.bidsinfo['sesfolder'] = str(Path(self.bidsinfo['subfolder'], self.bidsinfo['ses']))
 			print('Session folder NOT found: %s. Making it...' % self.bidsinfo['sesfolder'])
 			self.update_participants()
 			os.mkdir(self.bidsinfo['sesfolder'])
@@ -305,7 +311,7 @@ class Source2Raw():
 				print('Data folder found: %s' % i)
 			else:
 				print('Data folder NOT found: %s. Making it...' % i)
-				os.mkdir(Path(self.bidsinfo['sesfolder'], i])
+				os.mkdir(Path(self.bidsinfo['sesfolder'], i))
 		
 	def update_participants(self):
 		
@@ -346,7 +352,7 @@ class Source2Raw():
 	def convert_source_inputs(self):
 		
 		# DESCRIPTION: identify source folders to be converted to raw files
-		sourceFolder = Path(self.mrsource, self.mrscanner, self.inputvar['mr_id'])
+		sourceFolder = str(Path(self.mrsource, self.mrscanner, self.inputvar['mr_id']))
 		sourceDir = os.listdir(sourceFolder)
 		dcmfolders = [i for i in sourceDir if re.search('^(EP2D|T1|T2|GRE).*([0-9]{4})', i)]
 		d2n_path = 'dcm2niix'
@@ -362,7 +368,7 @@ class Source2Raw():
 				print('Existing match found: %s! Skipping dcm2niix...' % i)
 			else:
 				print('Converting: %s ' % i)
-				dcm2niix_cmd = d2n_path + ' -o ' + self.bidsinfo['sesfolder'] + ' -z y -f ' + i + ' ' + Path(sourceFolder,i)
+				dcm2niix_cmd = d2n_path + ' -o ' + self.bidsinfo['sesfolder'] + ' -z y -f ' + i + ' ' + str(Path(sourceFolder,i))
 				os.system(dcm2niix_cmd)
 		
 		print('Done converting source input folders!')
@@ -374,7 +380,7 @@ class Source2Raw():
 		# DESCRIPTION: generate participants.tsv file
 		
 		column_set = ['participant_id', 'session_id', 'mr_id']
-		fname = Path(self.bidsinfo['projfolder'], 'participants.tsv')
+		fname = str(Path(self.bidsinfo['projfolder'], 'participants.tsv'))
 		df = pd.DataFrame(columns=column_set)
 		df.to_csv(fname, sep = '\t', index = False)
 	
@@ -399,7 +405,7 @@ if __name__ == '__main__':
 #		mr_id = 'p240mb'
 #		argumentList = [raw_id, project_id, cimbi_id, mr_id]
 #	
-#	s2r = Source2Raw()
+#	s2r = Source2Raw(argumentList)
 #	s2r.check_rawfolder()
 #	s2r.check_sesfolder()
 #	s2r.check_datafolder()
