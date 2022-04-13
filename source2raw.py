@@ -56,7 +56,7 @@ class Source2Raw():
 		self.bids_data_types = ['anat','func','fmap']
 		
 		# list of available directories and name variants (update as needed)
-		self.func_dictionary = {'faces': ['faces'], 'reward': ['reward'], 'rest': ['rest', 'resting']}
+		self.func_dictionary = {'faces': ['faces'], 'reward': ['reward'], 'rest': ['rest', 'resting'], 'psap': ['psap']}
 		self.anat_dictionary = {'T1': ['t1'], 'T2': ['t2']}
 		self.fmap_dictionary = {'GRE_FIELD_MAPPING': ['gre_field_mapping']}
 		
@@ -111,7 +111,7 @@ class Source2Raw():
 					if self.sourcefile[elem]['data_type'] == 'func':
 						json_data['TaskName'] = self.sourcefile[elem]['task']
 						with open(json_fullpath, 'w') as outfile:
-							outfile.write(json.dumps(json_data, indent = 4))
+							outfile.write(json.dumps(json_data, indent = 2))
 					
 					# store data_type specific information in sourcefile dictionary
 					if 'AcquisitionTime' in json_data.keys():
