@@ -48,7 +48,7 @@ class DatasetDescrption():
 		data['BIDSVersion'] = 'v1.6.0'
 		data['Authors'] = ['Author 1', 'Author 2']
 		
-		self.json_string = json.dumps(data)
+		self.json_string = json.dumps(data, indent=2)
 	
 	def write_dataset_description(self):
 		
@@ -56,7 +56,7 @@ class DatasetDescrption():
 		
 		self.json_filename = '/'.join([self.inputvar['targetfolder'], 'dataset_description.json'])
 		jsonFile = open(self.json_filename, 'w')
-		jsonFile.write(self.json_string)
+		jsonFile.write(self.json_string, indent=2)
 		jsonFile.close()
 	
 	def generate_dataset_description(self):
