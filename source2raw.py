@@ -56,15 +56,12 @@ class Source2Raw():
 		self.bids_data_types = ['anat','func','fmap']
 		
 		# list of available directories and name variants (update as needed)
-		self.func_dictionary = {'faces': ['faces'], 'reward': ['reward'], 'rest': ['rest', 'resting'], 'psap': ['psap']}
+		self.func_dictionary = {'faces': ['faces'], 'reward': ['reward'], 'rest': ['rest', 'resting'], 'aarhus': ['aarhus'], 'music': ['music']}
 		self.anat_dictionary = {'T1': ['t1'], 'T2': ['t2']}
 		self.fmap_dictionary = {'GRE_FIELD_MAPPING': ['gre_field_mapping']}
 		
 		 # currently not used (delete?)
 		self.raw_file_types = ['T1', 'T2', 'EP2D', 'GRE']
-		
-		# flag used for excluding certain scans
-		self.raw_file_notallowed = ['ND']
 		
 	def process_dcmfolders(self):
 		
@@ -96,10 +93,14 @@ class Source2Raw():
 							self.sourcefile[elem]['data_type'] = j							
 							if j == 'func':
 								self.sourcefile[elem]['task'] = ''.join([k for k in self.func_dictionary.keys() if [v for v in self.func_dictionary[k] if re.search(v, elem.lower())]])
-								self.sourcefile[elem]['tail'] = 'bold'
+								self.sourcefile[elem]['suffix'] = 'bold'
 							elif j == 'anat':
-								self.sourcefile[elem]['tail'] = ''.join(matches) + 'w'								
+								self.sourcefile[elem]['suffix'] = ''.join(matches) + 'w'								
 							break # stop looping through data_types after match identified
+					
+					if 'data_type' not in self.sourcefile[elem].keys():
+						print('%s: data_type not identified, NA assigned' % elem)
+						self.sourcefile[elem]['data_type'] = 'NA'
 					
 					# load json file
 					json_fullpath = str(Path(self.bidsinfo['sesfolder'], elem))
@@ -111,7 +112,7 @@ class Source2Raw():
 					if self.sourcefile[elem]['data_type'] == 'func':
 						json_data['TaskName'] = self.sourcefile[elem]['task']
 						with open(json_fullpath, 'w') as outfile:
-							outfile.write(json.dumps(json_data, indent = 2))
+							outfile.write(json.dumps(json_data, indent = 4))
 					
 					# store data_type specific information in sourcefile dictionary
 					if 'AcquisitionTime' in json_data.keys():
@@ -131,22 +132,36 @@ class Source2Raw():
 					
 					if self.sourcefile[elem]['data_type'] == 'fmap':
 						if 'PHASE' in self.sourcefile[elem]['ImageType']:
-							self.sourcefile[elem]['tail'] = 'phasediff'
+							self.sourcefile[elem]['suffix'] = 'phasediff'
 						elif 'M' and 'NORM' in self.sourcefile[elem]['ImageType']:
 							if self.sourcefile[elem]['EchoNumber'] != '':
-								self.sourcefile[elem]['tail'] = 'magnitude' + str(self.sourcefile[elem]['EchoNumber'])
+								self.sourcefile[elem]['suffix'] = 'magnitude' + str(self.sourcefile[elem]['EchoNumber'])
 							else:
 								sys.exit('EchoNumber expected but not found.')
 						elif 'M' and not 'NORM' in self.sourcefile[elem]['ImageType']:
-							self.sourcefile[elem]['tail'] = ''
+							self.sourcefile[elem]['suffix'] = ''
+					
+					# remove anat image suffix if not ND (will result in being skipped)
+					if self.sourcefile[elem]['data_type'] == 'anat':
+						if 'ND' not in self.sourcefile[elem]['ImageType']:
+							print('Removing suffix for %s (not ND)' % elem)
+							self.sourcefile[elem]['suffix'] = ''
+					
+					if self.sourcefile[elem]['data_type'] == 'NA':
+						print('Removing suffix for %s (unknown data_type)' % elem)
+						self.sourcefile[elem]['suffix'] = ''
 		else:
 			sys.exit('dcmfolders is empty.') # something went wrong
 		
 		# loop through all intermediate image files to get info to set final name
 		for elem in self.sourcefile.keys():	
 			
-			# skip images without a tail
-			if not self.sourcefile[elem]['tail']:
+			if self.sourcefile[elem]['data_type'] == 'anat':
+				if 'ND' not in self.sourcefile[elem]['ImageType']:
+					self.sourcefile[elem]['suffix'] = ''
+			
+			# skip images without a suffix
+			if not self.sourcefile[elem]['suffix']:
 					continue
 			
 			# use acquisition times for similar image type to determine run number
@@ -155,12 +170,13 @@ class Source2Raw():
 				sorted_acqtimes = sorted([self.sourcefile[k]['AcquisitionTime'] for k in same_data_type if self.sourcefile[k]['task']==self.sourcefile[elem]['task']])	
 			
 			elif self.sourcefile[elem]['data_type'] == 'fmap' or self.sourcefile[elem]['data_type'] == 'anat':
-				same_tail = [k for k in self.sourcefile.keys() if self.sourcefile[k]['tail']==self.sourcefile[elem]['tail']]
-				sorted_acqtimes = sorted([self.sourcefile[k]['AcquisitionTime'] for k in same_tail])
+				same_suffix = [k for k in self.sourcefile.keys() if self.sourcefile[k]['suffix']==self.sourcefile[elem]['suffix']]
+				sorted_acqtimes = sorted([self.sourcefile[k]['AcquisitionTime'] for k in same_suffix])
 			
 			# determine run number for current image
 			curr_run = [idx for idx in range(len(sorted_acqtimes)) if sorted_acqtimes[idx]==self.sourcefile[elem]['AcquisitionTime']]
 			if len(curr_run)>1:
+				print(elem) # REMOVE ME
 				sys.exit('Multiple acquisitions have same time stamp') # something went wrong
 			elif len(curr_run)==0:
 				sys.exit('No matching acquisition time stamps found') # something went wrong
@@ -179,29 +195,29 @@ class Source2Raw():
 			
 			for elem in self.sourcefile.keys():
 				
-				# remove image files without a tail
-				if not self.sourcefile[elem]['tail']:
+				# remove image files without a suffix
+				if not self.sourcefile[elem]['suffix']:
 					print('Removing %s...' % self.sourcefile[elem]['oldjson'])
 					os.remove(self.sourcefile[elem]['oldjson'])
 					print('Removing %s...' % self.sourcefile[elem]['oldnii'])
 					os.remove(self.sourcefile[elem]['oldnii'])
 					continue
 				
-				tail_elem = self.sourcefile[elem]['tail']
+				suffix_elem = self.sourcefile[elem]['suffix']
 				data_type_elem = self.sourcefile[elem]['data_type']
 				run_elem = '-'.join(['run', self.sourcefile[elem]['run']])
 				
 				# write out new file name
 				if self.sourcefile[elem]['data_type'] == 'func':
 					task_elem = '-'.join(['task', self.sourcefile[elem]['task']])
-					newjson = str(Path(self.bidsinfo['sesfolder'], data_type_elem, '_'.join([sub_elem, ses_elem, task_elem, run_elem, tail_elem]) + '.json'))
-					newnii = str(Path(self.bidsinfo['sesfolder'], data_type_elem, '_'.join([sub_elem, ses_elem, task_elem, run_elem, tail_elem]) + '.nii.gz'))
+					newjson = str(Path(self.bidsinfo['sesfolder'], data_type_elem, '_'.join([sub_elem, ses_elem, task_elem, run_elem, suffix_elem]) + '.json'))
+					newnii = str(Path(self.bidsinfo['sesfolder'], data_type_elem, '_'.join([sub_elem, ses_elem, task_elem, run_elem, suffix_elem]) + '.nii.gz'))
 				elif self.sourcefile[elem]['data_type'] == 'anat':
-					newjson = str(Path(self.bidsinfo['sesfolder'], data_type_elem, '_'.join([sub_elem, ses_elem, tail_elem]) + '.json'))
-					newnii = str(Path(self.bidsinfo['sesfolder'], data_type_elem, '_'.join([sub_elem, ses_elem, tail_elem]) + '.nii.gz'))
+					newjson = str(Path(self.bidsinfo['sesfolder'], data_type_elem, '_'.join([sub_elem, ses_elem, suffix_elem]) + '.json'))
+					newnii = str(Path(self.bidsinfo['sesfolder'], data_type_elem, '_'.join([sub_elem, ses_elem, suffix_elem]) + '.nii.gz'))
 				elif self.sourcefile[elem]['data_type'] == 'fmap':
-					newjson = str(Path(self.bidsinfo['sesfolder'], data_type_elem, '_'.join([sub_elem, ses_elem, run_elem, tail_elem]) + '.json'))
-					newnii = str(Path(self.bidsinfo['sesfolder'], data_type_elem, '_'.join([sub_elem, ses_elem, run_elem, tail_elem]) + '.nii.gz'))
+					newjson = str(Path(self.bidsinfo['sesfolder'], data_type_elem, '_'.join([sub_elem, ses_elem, run_elem, suffix_elem]) + '.json'))
+					newnii = str(Path(self.bidsinfo['sesfolder'], data_type_elem, '_'.join([sub_elem, ses_elem, run_elem, suffix_elem]) + '.nii.gz'))
 				
 				self.sourcefile[elem]['newjson'] = newjson
 				self.sourcefile[elem]['newnii'] = newnii
@@ -216,6 +232,8 @@ class Source2Raw():
 				print('TO: %s' % self.sourcefile[elem]['newnii'])
 		else:
 			sys.exit('sourcefile is empty.') # something went wrong
+		
+		print('Finished converting files to bids for %s!' % self.bidsinfo['sesfolder'])
 	
 	def check_rawfolder(self):
 		
@@ -358,11 +376,6 @@ class Source2Raw():
 		d2n_path = 'dcm2niix'
 		toremove = []
 		for i in dcmfolders:
-			disallowed_matches = [tmpstr for tmpstr in self.raw_file_notallowed if re.search(tmpstr,i)]
-			if disallowed_matches:
-				print('Disallowed match found: %s. Skipping dcm2niix...' % i)
-				toremove.append(i)
-				continue
 			imgmatch = [fname for fname in os.listdir(self.bidsinfo['sesfolder']) if re.search('^(' + i + '.*.nii.gz)$', fname)]
 			if imgmatch:
 				print('Existing match found: %s! Skipping dcm2niix...' % i)
@@ -412,10 +425,24 @@ if __name__ == '__main__':
 #	s2r.convert_source_inputs()
 #	s2r.process_dcmfolders()
 #	s2r.move_dcmfolders()
-	
-# python3 /data1/patrick/SCRIPTS/py/source2raw/source2raw.py /mrdata/patrick/raw np2-p2 53888 p231sc 
-# python3 /data1/patrick/SCRIPTS/py/source2raw/source2raw.py /mrdata/patrick/raw np2-p2 55867 p240mb
-# python3 /data1/patrick/SCRIPTS/py/source2raw/source2raw.py /mrdata/patrick/raw np2-p2 53888 p239sc 
-# python3 /data1/patrick/SCRIPTS/py/source2raw/source2raw.py /mrdata/patrick/raw np2-p2 53888 p266
-
-# python3 /mrdata/patrick/source2raw.py /mrdata/patrick/raw np2-p2 53888 p231sc 
+#	
+## python3 /data1/patrick/SCRIPTS/py/source2raw/source2raw.py /mrdata/patrick/raw np2-p2 53888 p231sc 
+## python3 /data1/patrick/SCRIPTS/py/source2raw/source2raw.py /mrdata/patrick/raw np2-p2 55867 p240mb
+## python3 /data1/patrick/SCRIPTS/py/source2raw/source2raw.py /mrdata/patrick/raw np2-p2 53888 p239sc 
+## python3 /data1/patrick/SCRIPTS/py/source2raw/source2raw.py /mrdata/patrick/raw np2-p2 53888 p266
+#
+## python3 /mrdata/patrick/source2raw.py /mrdata/patrick/raw np2-p2 53888 p231sc 
+#
+#
+#raw_id = '/mrdata/patrick/raw'
+#project_id = 'np1'
+#cimbi_id = '53253'
+#mr_id = 'p001ps'
+#argumentList = [raw_id, project_id, cimbi_id, mr_id]
+#s2r = Source2Raw(argumentList)
+#s2r.check_rawfolder()
+#s2r.check_sesfolder()
+#s2r.check_datafolder()
+#s2r.convert_source_inputs()
+#s2r.process_dcmfolders()
+#s2r.move_dcmfolders()
